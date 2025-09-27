@@ -21,10 +21,16 @@ document.addEventListener('DOMContentLoaded', function () {
     let systemCount = 1;
     let debounceTimer;
     let selectedSuggestionIndex = -1;
+    let currentDayOffset = 0; // 0 = today, 1 = tomorrow, -1 = yesterday
+    let forecastData = null; // Store the forecast data for navigation
 
     // --- Event Listeners ---
     addSystemBtn.addEventListener('click', addSystemGroup);
     form.addEventListener('submit', handleFormSubmit);
+    
+    // Chart navigation
+    document.getElementById('prev-day-btn').addEventListener('click', () => navigateDay(-1));
+    document.getElementById('next-day-btn').addEventListener('click', () => navigateDay(1));
     
     // Address autocomplete
     addressInput.addEventListener('input', handleAddressInput);
@@ -150,8 +156,52 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function displayResults(data) {
         resultsContainer.style.display = 'block';
-        totalKwhElement.textContent = data.total_daily_kwh.toFixed(2) + ' kWh';
-        renderChart(data.hourly_forecast_kwh);
+        forecastData = data; // Store the full forecast data
+        currentDayOffset = 0; // Reset to today
+        updateDisplay();
+    }
+    
+    function updateDisplay() {
+        if (!forecastData) return;
+        
+        const dayIndex = currentDayOffset;
+        const dailyTotal = forecastData.daily_totals_kwh[dayIndex];
+        totalKwhElement.textContent = dailyTotal.toFixed(2) + ' kWh';
+        
+        // Update date display
+        const date = new Date();
+        date.setDate(date.getDate() + currentDayOffset);
+        const dateStr = date.toLocaleDateString('en-US', { 
+            weekday: 'long', 
+            month: 'short', 
+            day: 'numeric' 
+        });
+        document.getElementById('current-date').textContent = dateStr;
+        
+        // Update chart with current day's data
+        const startHour = dayIndex * 24;
+        const endHour = startHour + 24;
+        const dayData = forecastData.hourly_forecast_kwh.slice(startHour, endHour);
+        renderChart(dayData);
+        
+        // Update navigation buttons
+        updateNavigationButtons();
+    }
+    
+    function updateNavigationButtons() {
+        const prevBtn = document.getElementById('prev-day-btn');
+        const nextBtn = document.getElementById('next-day-btn');
+        
+        prevBtn.disabled = currentDayOffset <= -6; // Allow 6 days back
+        nextBtn.disabled = currentDayOffset >= 6;  // Allow 6 days forward
+    }
+    
+    function navigateDay(direction) {
+        const newOffset = currentDayOffset + direction;
+        if (newOffset >= -6 && newOffset <= 6) {
+            currentDayOffset = newOffset;
+            updateDisplay();
+        }
     }
 
     function renderChart(hourlyData) {
@@ -199,6 +249,9 @@ document.addEventListener('DOMContentLoaded', function () {
                                 return ` ${context.raw.toFixed(2)} kWh`;
                             }
                         }
+                    },
+                    legend: {
+                        display: false
                     }
                 }
             }

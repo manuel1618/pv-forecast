@@ -1,15 +1,16 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-import openmeteo_requests
-import requests_cache
-from retry_requests import retry
-from geopy.geocoders import Nominatim
-import pandas as pd
-import numpy as np
 import logging
+from typing import Any, Dict, List
+
+import numpy as np
+import openmeteo_requests
+import pandas as pd
+import requests_cache
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from geopy.geocoders import Nominatim
+from pydantic import BaseModel, Field
+from retry_requests import retry
 
 # Configure logging for production
 logging.basicConfig(level=logging.WARNING)
@@ -160,7 +161,7 @@ async def get_pv_forecast(request: ForecastRequest) -> Dict[str, Any]:
     latitude = location.latitude
     longitude = location.longitude
 
-    total_hourly_kwh = pd.Series([0.0] * 24)
+    total_hourly_kwh = pd.Series([0.0] * 168)  # 7 days * 24 hours
 
     for system in request.pv_systems:
         # API call for each system due to unique tilt/azimuth
@@ -169,7 +170,7 @@ async def get_pv_forecast(request: ForecastRequest) -> Dict[str, Any]:
             "latitude": latitude,
             "longitude": longitude,
             "hourly": "global_tilted_irradiance,temperature_2m",
-            "forecast_days": 1,
+            "forecast_days": 7,  # Get 7 days of forecast data
             "tilt": system.inclination,
             "azimuth": system.azimuth,
         }
@@ -187,8 +188,10 @@ async def get_pv_forecast(request: ForecastRequest) -> Dict[str, Any]:
             # Advanced PV calculation following the 5-step model
             hourly_kwh = calculate_advanced_pv_energy(irradiance, ambient_temp, system)
 
-            # Ensure the series has 24 data points
-            series_kwh = pd.Series(hourly_kwh).reindex(range(24), fill_value=0.0)
+            # Ensure the series has the correct number of data points (7 days * 24 hours)
+            series_kwh = pd.Series(hourly_kwh).reindex(
+                range(168), fill_value=0.0
+            )  # 7 days * 24 hours
             total_hourly_kwh += series_kwh
 
         except Exception as e:
@@ -197,17 +200,25 @@ async def get_pv_forecast(request: ForecastRequest) -> Dict[str, Any]:
             # For now, we'll be robust and just skip the failing system.
             continue
 
-    total_daily_kwh = total_hourly_kwh.sum()
+    # Calculate daily totals for each day
+    daily_totals = []
+    for day in range(7):
+        start_hour = day * 24
+        end_hour = start_hour + 24
+        daily_kwh = total_hourly_kwh[start_hour:end_hour].sum()
+        daily_totals.append(round(daily_kwh, 2))
 
     return {
         "latitude": latitude,
         "longitude": longitude,
         "hourly_forecast_kwh": total_hourly_kwh.round(2).tolist(),
-        "total_daily_kwh": round(total_daily_kwh, 2),
+        "daily_totals_kwh": daily_totals,
+        "total_daily_kwh": round(daily_totals[0], 2),  # Today's total
     }
 
 
 if __name__ == "__main__":
     import uvicorn
 
+    uvicorn.run(app, host="127.0.0.1", port=8000)
     uvicorn.run(app, host="127.0.0.1", port=8000)
