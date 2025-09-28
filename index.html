@@ -34,6 +34,7 @@
                     </div>
                 </div>
 
+
                 <!-- Form -->
                 <form id="forecast-form">
                     <div class="mb-4">
@@ -98,15 +99,6 @@
                                     <input type="number" class="form-control" name="azimuth" placeholder="0"
                                         min="-180" max="180" value="0" required>
                                 </div>
-                                <div class="col-md-2">
-                                    <label class="form-label">
-                                        System Losses (%)
-                                        <i class="bi bi-question-circle text-muted ms-1" data-bs-toggle="tooltip" 
-                                           title="Total system losses including inverter efficiency, wiring, dust, etc. 14% is a typical default value."></i>
-                                    </label>
-                                    <input type="number" class="form-control" name="system_losses" placeholder="14"
-                                        min="5" max="25" step="1" value="14">
-                                </div>
                             </div>
                         </div>
 
@@ -147,15 +139,6 @@
                                     </label>
                                     <input type="number" class="form-control" name="azimuth" placeholder="0"
                                         min="-180" max="180" value="0" required>
-                                </div>
-                                <div class="col-md-2">
-                                    <label class="form-label">
-                                        System Losses (%)
-                                        <i class="bi bi-question-circle text-muted ms-1" data-bs-toggle="tooltip" 
-                                           title="Total system losses including inverter efficiency, wiring, dust, etc. 14% is a typical default value."></i>
-                                    </label>
-                                    <input type="number" class="form-control" name="system_losses" placeholder="14"
-                                        min="5" max="25" step="1" value="14">
                                 </div>
                                 </div>
                             </div>
@@ -199,15 +182,44 @@
                                     <input type="number" class="form-control" name="azimuth" placeholder="0"
                                         min="-180" max="180" value="0" required>
                                 </div>
-                                <div class="col-md-2">
-                                    <label class="form-label">
-                                        System Losses (%)
-                                        <i class="bi bi-question-circle text-muted ms-1" data-bs-toggle="tooltip" 
-                                           title="Total system losses including inverter efficiency, wiring, dust, etc. 14% is a typical default value."></i>
-                                    </label>
-                                    <input type="number" class="form-control" name="system_losses" placeholder="14"
-                                        min="5" max="25" step="1" value="14">
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Settings -->
+                    <div class="mt-4">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#advanced-settings" aria-expanded="false" aria-controls="advanced-settings">
+                            <i class="bi bi-gear"></i> Advanced Settings
+                        </button>
+                        <div class="collapse mt-3" id="advanced-settings">
+                            <div class="card card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <label for="temperature-coefficient" class="form-label">
+                                            Temperature Coefficient (%/°C)
+                                            <i class="bi bi-question-circle text-muted ms-1" data-bs-toggle="tooltip" 
+                                               title="How much panel efficiency decreases per degree above STC temperature. Typical values: -0.3% to -0.5% per °C."></i>
+                                        </label>
+                                        <select class="form-select" id="temperature-coefficient">
+                                            <option value="-0.002">-0.2% per °C (Low temperature sensitivity)</option>
+                                            <option value="-0.003" selected>-0.3% per °C (Moderate)</option>
+                                            <option value="-0.004">-0.4% per °C (Standard)</option>
+                                            <option value="-0.005">-0.5% per °C (High temperature sensitivity)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="stc-temperature" class="form-label">
+                                            STC Temperature (°C)
+                                            <i class="bi bi-question-circle text-muted ms-1" data-bs-toggle="tooltip" 
+                                               title="Standard Test Conditions temperature. Most panels are rated at 25°C, but some are rated at 20°C or 30°C."></i>
+                                        </label>
+                                        <select class="form-select" id="stc-temperature">
+                                            <option value="20">20°C (Some European panels)</option>
+                                            <option value="25" selected>25°C (Standard IEC rating)</option>
+                                            <option value="30">30°C (Some high-temperature panels)</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -215,6 +227,29 @@
 
                     <div class="text-center mt-4">
                         <button type="submit" class="btn btn-primary btn-lg">Calculate Forecast</button>
+                    </div>
+                    
+                    <!-- Calculation Method Details -->
+                    <div class="mt-4">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#calculation-details" aria-expanded="false" aria-controls="calculation-details">
+                            <i class="bi bi-chevron-down"></i> 📊 Calculation Method Details
+                        </button>
+                        <div class="collapse mt-3" id="calculation-details">
+                            <div class="card card-body">
+                                <p class="mb-1"><strong>Main Formula:</strong> Power = System Power × (Irradiance / 1000) × 75% × Temperature Factor</p>
+                                <p class="mb-1"><strong>Temperature Factor:</strong> Temperature Factor = 1 + Temperature Coefficient × (Cell Temperature - STC Temperature)</p>
+                                <p class="mb-1"><strong>Cell Temperature:</strong> Cell Temperature = Ambient Temperature + (Irradiance / 1000) × 20°C</p>
+                                <p class="mb-1"><strong>Step-by-Step:</strong></p>
+                                <ul class="mb-3">
+                                    <li><strong>Step 1:</strong> Power Ratio = Irradiance (W/m²) ÷ 1000</li>
+                                    <li><strong>Step 2:</strong> Cell Temperature = Ambient Temperature + (Irradiance ÷ 1000) × 20°C</li>
+                                    <li><strong>Step 3:</strong> Temperature Factor = 1 + Temperature Coefficient × (Cell Temperature - STC Temperature)</li>
+                                    <li><strong>Step 4:</strong> Hourly Power = System Power × Power Ratio × 0.75 × Temperature Factor</li>
+                                </ul>
+                                <p class="mb-1"><strong>Advanced Settings:</strong> Temperature coefficient and STC temperature can be configured in Advanced Settings to match your specific panel specifications.</p>
+                                <p class="mb-0"><strong>Assumptions:</strong> Base 75% efficiency includes inverter, cable, and system losses. Temperature factor accounts for panel heating (configurable % per °C above STC temperature). The weather API handles panel orientation, but temperature affects performance differently for different orientations.</p>
+                            </div>
+                        </div>
                     </div>
                 </form>
 
@@ -281,6 +316,7 @@
 
             </div>
         </div>
+        
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

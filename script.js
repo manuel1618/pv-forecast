@@ -54,37 +54,35 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- PV Calculation Functions ---
     function calculateSimplePvEnergy(irradiance, ambientTemp, system) {
         /**
-         * Transparent PV energy calculation using real temperature data:
-         * Power = System Power * (Irradiance / 1000) * Temperature Factor * System Losses
+         * PV energy calculation with temperature efficiency:
+         * Power = System Power * (Irradiance / 1000) * Temperature Factor * Base Efficiency
          * 
-         * Temperature Factor = 1 + temperature_coefficient * (cell_temp - 25°C)
-         * Cell Temperature = ambient_temp + (irradiance / 1000) * 30°C (simplified)
-         * System Losses = user-defined percentage (cables, inverter, etc.)
+         * The weather API handles angles, but temperature affects panel performance.
+         * East-facing panels are cooler in the morning, south-facing hottest at noon.
          */
         
-        const temperatureCoefficient = -0.004; // -0.4% per °C (typical for silicon panels)
-        const STC_TEMPERATURE = 25; // Standard Test Conditions temperature
+        // Get temperature settings from user input
+        const temperatureCoefficient = parseFloat(document.getElementById('temperature-coefficient').value);
+        const STC_TEMPERATURE = parseFloat(document.getElementById('stc-temperature').value);
+        const baseEfficiency = 0.75; // Base system efficiency
         
         const hourlyEnergy = irradiance.map((irr, i) => {
             // Convert irradiance to power ratio (1000 W/m² = 100%)
             const powerRatio = irr / 1000;
             
-            // More conservative cell temperature estimation
-            // Cell temp = ambient + heating from irradiance (reduced heating factor)
-            const cellTemperature = ambientTemp[i] + (irr / 1000) * 20; // Reduced from 30 to 20
+            // Estimate cell temperature (simplified model)
+            const cellTemperature = ambientTemp[i] + (irr / 1000) * 20;
             
             // Calculate temperature derating factor
             const temperatureFactor = 1 + temperatureCoefficient * (cellTemperature - STC_TEMPERATURE);
             
-            // Apply system losses (user-defined: cables, inverter, etc.)
-            const systemEfficiency = 1 - system.system_losses;
-            
-            // Calculate hourly energy in kWh
-            return system.power * powerRatio * temperatureFactor * systemEfficiency;
+            // Calculate hourly energy with temperature correction
+            return system.power * powerRatio * baseEfficiency * temperatureFactor;
         });
 
         return hourlyEnergy;
     }
+    
 
     // --- Event Listeners ---
     form.addEventListener('submit', handleFormSubmit);
@@ -105,6 +103,10 @@ document.addEventListener('DOMContentLoaded', function () {
     // Dark mode
     document.getElementById('dark-mode-toggle').addEventListener('click', toggleDarkMode);
     
+    // Advanced settings - save when changed
+    document.getElementById('temperature-coefficient').addEventListener('change', saveFormData);
+    document.getElementById('stc-temperature').addEventListener('change', saveFormData);
+    
     // Clear data
     document.getElementById('clear-data-btn').addEventListener('click', function() {
         if (confirm('Are you sure you want to clear all saved data? This will reset the form and clear the cache.')) {
@@ -119,8 +121,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 system.querySelector('input[name="power"]').value = '0';
                 system.querySelector('input[name="inclination"]').value = '10';
                 system.querySelector('input[name="azimuth"]').value = '0';
-                system.querySelector('input[name="system_losses"]').value = '14';
             });
+            // Reset advanced settings to default
+            const tempCoeffElement = document.getElementById('temperature-coefficient');
+            const stcTempElement = document.getElementById('stc-temperature');
+            if (tempCoeffElement) {
+                tempCoeffElement.value = '-0.003';
+            }
+            if (stcTempElement) {
+                stcTempElement.value = '25';
+            }
             // Clear results
             if (forecastData) {
                 document.getElementById('results-container').style.display = 'none';
@@ -164,14 +174,12 @@ document.addEventListener('DOMContentLoaded', function () {
             const power = group.querySelector('input[name="power"]').value;
             const inclination = group.querySelector('input[name="inclination"]').value;
             const azimuth = group.querySelector('input[name="azimuth"]').value;
-            const systemLosses = group.querySelector('input[name="system_losses"]').value || 14;
 
             if (power && inclination && azimuth) {
                 pvSystems.push({
                     power: parseFloat(power),
                     inclination: parseFloat(inclination),
-                    azimuth: parseFloat(azimuth),
-                    system_losses: parseFloat(systemLosses) / 100 // Convert percentage to decimal
+                    azimuth: parseFloat(azimuth)
                 });
             }
         });
@@ -369,6 +377,7 @@ document.addEventListener('DOMContentLoaded', function () {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                devicePixelRatio: window.devicePixelRatio || 1,
                 interaction: {
                     intersect: false,
                     mode: 'index'
@@ -382,6 +391,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         title: {
                             display: true,
                             text: 'Energy (kWh)'
+                        },
+                        ticks: {
+                            maxTicksLimit: window.innerWidth < 576 ? 5 : 8
                         }
                     },
                     y1: {
@@ -401,6 +413,10 @@ document.addEventListener('DOMContentLoaded', function () {
                         title: {
                             display: true,
                             text: 'Hour of the Day'
+                        },
+                        ticks: {
+                            maxTicksLimit: window.innerWidth < 576 ? 12 : 24,
+                            maxRotation: window.innerWidth < 576 ? 45 : 0
                         }
                     }
                 },
@@ -762,6 +778,7 @@ document.addEventListener('DOMContentLoaded', function () {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            devicePixelRatio: window.devicePixelRatio || 1,
             interaction: {
                 intersect: false,
                 mode: 'index'
@@ -924,17 +941,25 @@ document.addEventListener('DOMContentLoaded', function () {
                 const power = group.querySelector('input[name="power"]').value;
                 const inclination = group.querySelector('input[name="inclination"]').value;
                 const azimuth = group.querySelector('input[name="azimuth"]').value;
-                const systemLosses = group.querySelector('input[name="system_losses"]').value;
 
                 if (power || inclination || azimuth) {
                     formData.pvSystems.push({
                         power: power || '',
                         inclination: inclination || '',
-                        azimuth: azimuth || '',
-                        system_losses: systemLosses || '14'
+                        azimuth: azimuth || ''
                     });
                 }
             });
+
+            // Save advanced settings
+            const tempCoeffElement = document.getElementById('temperature-coefficient');
+            const stcTempElement = document.getElementById('stc-temperature');
+            if (tempCoeffElement) {
+                formData.temperatureCoefficient = tempCoeffElement.value;
+            }
+            if (stcTempElement) {
+                formData.stcTemperature = stcTempElement.value;
+            }
 
             // Save to localStorage
             localStorage.setItem('pvForecastFormData', JSON.stringify(formData));
@@ -989,8 +1014,21 @@ document.addEventListener('DOMContentLoaded', function () {
                         system.querySelector('input[name="power"]').value = data.power || '0';
                         system.querySelector('input[name="inclination"]').value = data.inclination || '10';
                         system.querySelector('input[name="azimuth"]').value = data.azimuth || '0';
-                        system.querySelector('input[name="system_losses"]').value = data.system_losses || '14';
                     }
+                }
+            }
+
+            // Restore advanced settings
+            if (formData.temperatureCoefficient) {
+                const tempCoeffElement = document.getElementById('temperature-coefficient');
+                if (tempCoeffElement) {
+                    tempCoeffElement.value = formData.temperatureCoefficient;
+                }
+            }
+            if (formData.stcTemperature) {
+                const stcTempElement = document.getElementById('stc-temperature');
+                if (stcTempElement) {
+                    stcTempElement.value = formData.stcTemperature;
                 }
             }
             
