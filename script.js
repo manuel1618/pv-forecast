@@ -12,8 +12,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const DEBOUNCE_DELAY = 300;
     const MIN_QUERY_LENGTH = 3;
     const CACHE_TTL = 3600000; // 1 hour in milliseconds
-    const STC_TEMPERATURE = 25.0; // Standard Test Conditions temperature in °C
-    const STC_IRRADIANCE = 1000.0; // Standard Test Conditions irradiance in W/m²
     
     // State variables
     let chart;
@@ -54,39 +52,36 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     // --- PV Calculation Functions ---
-    function calculateAdvancedPvEnergy(irradiance, ambientTemp, system) {
+    function calculateSimplePvEnergy(irradiance, ambientTemp, system) {
         /**
-         * Advanced PV energy calculation following the 5-step model:
-         * 1. Get POA irradiance (input)
-         * 2. Estimate module cell temperature
-         * 3. Correct module efficiency for temperature
-         * 4. Calculate energy per time step
-         * 5. Sum for daily total (handled by caller)
+         * Transparent PV energy calculation using real temperature data:
+         * Power = System Power * (Irradiance / 1000) * Temperature Factor * System Losses
+         * 
+         * Temperature Factor = 1 + temperature_coefficient * (cell_temp - 25°C)
+         * Cell Temperature = ambient_temp + (irradiance / 1000) * 30°C (simplified)
+         * System Losses = user-defined percentage (cables, inverter, etc.)
          */
         
-        // Step 2: Estimate module cell temperature
-        // T_c = T_a + ((NOCT - 20) / 800) * I_POA
-        const cellTemperature = ambientTemp.map((temp, i) => 
-            temp + ((system.noct - 20) / 800) * irradiance[i]
-        );
-
-        // Step 3: Correct module efficiency for temperature
-        // η_mod,eff = η_STC * (1 + γ * (T_c - 25))
-        const moduleEfficiency = cellTemperature.map(temp => 
-            system.module_efficiency * (1 + system.temperature_coefficient * (temp - STC_TEMPERATURE))
-        );
-
-        // Step 4: Calculate energy per time step (1 hour)
-        // E_step = (I_POA * A_mod * η_mod,eff * (1 - L) / 1000) * Δt
-        // Where A_mod = P_rated / (η_STC * 1000) and Δt = 1 hour
-
-        // Calculate module area from rated power and efficiency
-        const moduleArea = (system.power * 1000) / (system.module_efficiency * STC_IRRADIANCE);
-
-        // Calculate hourly energy in kWh
-        const hourlyEnergy = irradiance.map((irr, i) => 
-            (irr * moduleArea * moduleEfficiency[i] * (1 - system.system_losses) / 1000)
-        );
+        const temperatureCoefficient = -0.004; // -0.4% per °C (typical for silicon panels)
+        const STC_TEMPERATURE = 25; // Standard Test Conditions temperature
+        
+        const hourlyEnergy = irradiance.map((irr, i) => {
+            // Convert irradiance to power ratio (1000 W/m² = 100%)
+            const powerRatio = irr / 1000;
+            
+            // More conservative cell temperature estimation
+            // Cell temp = ambient + heating from irradiance (reduced heating factor)
+            const cellTemperature = ambientTemp[i] + (irr / 1000) * 20; // Reduced from 30 to 20
+            
+            // Calculate temperature derating factor
+            const temperatureFactor = 1 + temperatureCoefficient * (cellTemperature - STC_TEMPERATURE);
+            
+            // Apply system losses (user-defined: cables, inverter, etc.)
+            const systemEfficiency = 1 - system.system_losses;
+            
+            // Calculate hourly energy in kWh
+            return system.power * powerRatio * temperatureFactor * systemEfficiency;
+        });
 
         return hourlyEnergy;
     }
@@ -176,11 +171,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     power: parseFloat(power),
                     inclination: parseFloat(inclination),
                     azimuth: parseFloat(azimuth),
-                    system_losses: parseFloat(systemLosses) / 100, // Convert percentage to decimal
-                    // Use industry-standard defaults for advanced settings
-                    module_efficiency: 0.18, // 18% - typical for modern panels
-                    temperature_coefficient: -0.0035, // -0.35%/°C - typical for silicon panels
-                    noct: 45.0 // 45°C - typical NOCT value
+                    system_losses: parseFloat(systemLosses) / 100 // Convert percentage to decimal
                 });
             }
         });
@@ -239,8 +230,8 @@ document.addEventListener('DOMContentLoaded', function () {
                         temperatureData = ambientTemp;
                     }
 
-                    // Calculate PV energy using our JavaScript function
-                    const hourlyKwh = calculateAdvancedPvEnergy(irradiance, ambientTemp, system);
+                    // Calculate PV energy using our transparent JavaScript function
+                    const hourlyKwh = calculateSimplePvEnergy(irradiance, ambientTemp, system);
 
                     // Add to total (ensure we have 168 hours)
                     for (let i = 0; i < 168; i++) {
