@@ -348,10 +348,12 @@ document.addEventListener('DOMContentLoaded', function () {
         const datasets = [{
             label: 'Expected Energy (kWh)',
             data: hourlyData,
-            backgroundColor: 'rgba(54, 162, 235, 0.6)',
+            backgroundColor: 'rgba(54, 162, 235, 0.8)',
             borderColor: 'rgba(54, 162, 235, 1)',
             borderWidth: 1,
-            yAxisID: 'y'
+            yAxisID: 'y',
+            barThickness: 'flex',
+            maxBarThickness: 50
         }];
 
         if (showTemp && tempData) {
@@ -376,6 +378,10 @@ document.addEventListener('DOMContentLoaded', function () {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
                 scales: {
                     y: {
                         type: 'linear',
@@ -735,10 +741,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const datasets = [{
         label: 'Daily Energy (kWh)',
         data: energyData,
-        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+        backgroundColor: 'rgba(54, 162, 235, 0.8)',
         borderColor: 'rgba(54, 162, 235, 1)',
         borderWidth: 1,
-        yAxisID: 'y'
+        yAxisID: 'y',
+        barThickness: 'flex',
+        maxBarThickness: 80
     }];
 
     if (showTemp && tempData.length > 0) {
@@ -763,6 +771,10 @@ document.addEventListener('DOMContentLoaded', function () {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
             scales: {
                 y: {
                     type: 'linear',
