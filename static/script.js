@@ -15,6 +15,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const DEBOUNCE_DELAY = 300;
     const MIN_QUERY_LENGTH = 3;
     const MAX_SUGGESTIONS = 5;
+    const CACHE_TTL = 3600000; // 1 hour in milliseconds
+    const STC_TEMPERATURE = 25.0; // Standard Test Conditions temperature in °C
+    const STC_IRRADIANCE = 1000.0; // Standard Test Conditions irradiance in W/m²
     
     // State variables
     let chart;
@@ -23,6 +26,73 @@ document.addEventListener('DOMContentLoaded', function () {
     let selectedSuggestionIndex = -1;
     let currentDayOffset = 0; // 0 = today, 1 = tomorrow, -1 = yesterday
     let forecastData = null; // Store the forecast data for navigation
+
+    // --- Client-side caching ---
+    const cache = {
+        set: (key, data, ttl = CACHE_TTL) => {
+            try {
+                localStorage.setItem(key, JSON.stringify({
+                    data,
+                    expires: Date.now() + ttl
+                }));
+            } catch (e) {
+                console.warn('Failed to cache data:', e);
+            }
+        },
+        get: (key) => {
+            try {
+                const item = localStorage.getItem(key);
+                if (!item) return null;
+                const { data, expires } = JSON.parse(item);
+                if (Date.now() > expires) {
+                    localStorage.removeItem(key);
+                    return null;
+                }
+                return data;
+            } catch (e) {
+                console.warn('Failed to retrieve cached data:', e);
+                return null;
+            }
+        }
+    };
+
+    // --- PV Calculation Functions ---
+    function calculateAdvancedPvEnergy(irradiance, ambientTemp, system) {
+        /**
+         * Advanced PV energy calculation following the 5-step model:
+         * 1. Get POA irradiance (input)
+         * 2. Estimate module cell temperature
+         * 3. Correct module efficiency for temperature
+         * 4. Calculate energy per time step
+         * 5. Sum for daily total (handled by caller)
+         */
+        
+        // Step 2: Estimate module cell temperature
+        // T_c = T_a + ((NOCT - 20) / 800) * I_POA
+        const cellTemperature = ambientTemp.map((temp, i) => 
+            temp + ((system.noct - 20) / 800) * irradiance[i]
+        );
+
+        // Step 3: Correct module efficiency for temperature
+        // η_mod,eff = η_STC * (1 + γ * (T_c - 25))
+        const moduleEfficiency = cellTemperature.map(temp => 
+            system.module_efficiency * (1 + system.temperature_coefficient * (temp - STC_TEMPERATURE))
+        );
+
+        // Step 4: Calculate energy per time step (1 hour)
+        // E_step = (I_POA * A_mod * η_mod,eff * (1 - L) / 1000) * Δt
+        // Where A_mod = P_rated / (η_STC * 1000) and Δt = 1 hour
+
+        // Calculate module area from rated power and efficiency
+        const moduleArea = (system.power * 1000) / (system.module_efficiency * STC_IRRADIANCE);
+
+        // Calculate hourly energy in kWh
+        const hourlyEnergy = irradiance.map((irr, i) => 
+            (irr * moduleArea * moduleEfficiency[i] * (1 - system.system_losses) / 1000)
+        );
+
+        return hourlyEnergy;
+    }
 
     // --- Event Listeners ---
     addSystemBtn.addEventListener('click', addSystemGroup);
@@ -121,31 +191,67 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (pvSystems.length === 0) {
             showError('Please fill out at least one PV system.');
+            loadingSpinner.style.display = 'none';
             return;
         }
 
-        const requestBody = {
-            address: address,
-            pv_systems: pvSystems
-        };
-
-        // Fetch from API
         try {
-            const response = await fetch('/api/forecast', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'An unknown error occurred.');
+            // Step 1: Geocode the address
+            const location = await geocodeAddress(address);
+            if (!location) {
+                throw new Error(`Address not found: '${address}'. Please try a more specific address.`);
             }
 
-            const data = await response.json();
-            displayResults(data);
+            const latitude = location.latitude;
+            const longitude = location.longitude;
+
+            // Step 2: Get weather data and calculate PV energy for each system
+            let totalHourlyKwh = new Array(168).fill(0); // 7 days * 24 hours
+
+            for (const system of pvSystems) {
+                try {
+                    // Get weather data from Open-Meteo API
+                    const weatherData = await getWeatherData(latitude, longitude, system.inclination, system.azimuth);
+                    
+                    // Extract irradiance and temperature data
+                    const irradiance = weatherData.hourly.global_tilted_irradiance;
+                    const ambientTemp = weatherData.hourly.temperature_2m;
+
+                    // Calculate PV energy using our JavaScript function
+                    const hourlyKwh = calculateAdvancedPvEnergy(irradiance, ambientTemp, system);
+
+                    // Add to total (ensure we have 168 hours)
+                    for (let i = 0; i < 168; i++) {
+                        totalHourlyKwh[i] += (hourlyKwh[i] || 0);
+                    }
+
+                } catch (error) {
+                    console.warn(`Failed to process PV system:`, system, error);
+                    // Continue with other systems if one fails
+                }
+            }
+
+            // Calculate daily totals
+            const dailyTotals = [];
+            for (let day = 0; day < 7; day++) {
+                const startHour = day * 24;
+                const endHour = startHour + 24;
+                const dailyKwh = totalHourlyKwh.slice(startHour, endHour).reduce((sum, val) => sum + val, 0);
+                dailyTotals.push(Math.round(dailyKwh * 100) / 100);
+            }
+
+            // Round hourly data
+            const hourlyForecastKwh = totalHourlyKwh.map(val => Math.round(val * 100) / 100);
+
+            const result = {
+                latitude,
+                longitude,
+                hourly_forecast_kwh: hourlyForecastKwh,
+                daily_totals_kwh: dailyTotals,
+                total_daily_kwh: Math.round(dailyTotals[0] * 100) / 100
+            };
+
+            displayResults(result);
 
         } catch (error) {
             showError(error.message);
@@ -263,6 +369,85 @@ document.addEventListener('DOMContentLoaded', function () {
         errorMessage.style.display = 'block';
     }
 
+    // --- API Helper Functions ---
+    async function geocodeAddress(address) {
+        try {
+            // Check cache first
+            const cacheKey = `geocode_single_${address}`;
+            const cached = cache.get(cacheKey);
+            if (cached) {
+                return cached;
+            }
+
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&addressdetails=1`,
+                {
+                    headers: {
+                        'User-Agent': 'PV-Forecast-Calculator/1.0'
+                    }
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            
+            if (!data || data.length === 0) {
+                return null;
+            }
+
+            const location = {
+                latitude: parseFloat(data[0].lat),
+                longitude: parseFloat(data[0].lon)
+            };
+
+            // Cache the result
+            cache.set(cacheKey, location);
+            
+            return location;
+        } catch (error) {
+            console.error('Geocoding error:', error);
+            throw new Error(`Geocoding failed: ${error.message}`);
+        }
+    }
+
+    async function getWeatherData(latitude, longitude, tilt, azimuth) {
+        try {
+            // Check cache first
+            const cacheKey = `weather_${latitude}_${longitude}_${tilt}_${azimuth}`;
+            const cached = cache.get(cacheKey);
+            if (cached) {
+                return cached;
+            }
+
+            const url = new URL('https://api.open-meteo.com/v1/forecast');
+            url.searchParams.set('latitude', latitude);
+            url.searchParams.set('longitude', longitude);
+            url.searchParams.set('hourly', 'global_tilted_irradiance,temperature_2m');
+            url.searchParams.set('forecast_days', '7');
+            url.searchParams.set('tilt', tilt);
+            url.searchParams.set('azimuth', azimuth);
+
+            const response = await fetch(url.toString());
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Cache the result
+            cache.set(cacheKey, data);
+
+            return data;
+        } catch (error) {
+            console.error('Weather API error:', error);
+            throw new Error(`Weather data fetch failed: ${error.message}`);
+        }
+    }
+
     // --- Address Autocomplete Functions ---
     function handleAddressInput(event) {
         const query = event.target.value.trim();
@@ -314,15 +499,47 @@ document.addEventListener('DOMContentLoaded', function () {
 
     async function fetchAddressSuggestions(query) {
         try {
-            const response = await fetch(`/api/geocode?query=${encodeURIComponent(query)}`);
+            // Check cache first
+            const cacheKey = `geocode_${query}`;
+            const cached = cache.get(cacheKey);
+            if (cached) {
+                displaySuggestions(cached);
+                return;
+            }
+
+            // Call Nominatim API directly
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`,
+                {
+                    headers: {
+                        'User-Agent': 'PV-Forecast-Calculator/1.0'
+                    }
+                }
+            );
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
             const data = await response.json();
             
-            if (data.suggestions && data.suggestions.length > 0) {
-                displaySuggestions(data.suggestions);
+            // Transform Nominatim response to match our expected format
+            const suggestions = data.map(item => ({
+                address: item.display_name,
+                latitude: parseFloat(item.lat),
+                longitude: parseFloat(item.lon)
+            }));
+            
+            // Cache the results
+            cache.set(cacheKey, suggestions);
+            
+            if (suggestions.length > 0) {
+                displaySuggestions(suggestions);
             } else {
                 hideSuggestions();
             }
         } catch (error) {
+            console.warn('Geocoding error:', error);
             hideSuggestions();
         }
     }
