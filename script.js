@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let chart;
     let debounceTimer;
     let selectedSuggestionIndex = -1;
+    let lastAddressSuggestions = []; // Store last fetched address suggestions for fallback
     let currentDayOffset = 0; // 0 = today, 1 = tomorrow, -1 = yesterday
     let forecastData = null; // Store the forecast data for navigation
     let temperatureData = null; // Store temperature data for overlay
@@ -209,8 +210,43 @@ document.addEventListener('DOMContentLoaded', function () {
                     throw new Error('No saved GPS coordinates found');
                 }
             } else {
-                // Step 1: Geocode the address
-                const location = await geocodeAddress(address);
+                // Step 1: Determine location from selected suggestion or fallback
+                let location = null;
+
+                // If we have address suggestions, try to use them first
+                if (lastAddressSuggestions && lastAddressSuggestions.length > 0) {
+                    const normalizedInput = address.trim().toLowerCase();
+
+                    // Prefer an exact match if the user actually selected a suggestion
+                    const exactMatch = lastAddressSuggestions.find(suggestion =>
+                        suggestion.address.trim().toLowerCase() === normalizedInput
+                    );
+
+                    if (exactMatch) {
+                        location = {
+                            latitude: exactMatch.latitude,
+                            longitude: exactMatch.longitude
+                        };
+                    } else {
+                        // Fallback: use the top suggestion so mobile users don't have to tap explicitly
+                        const top = lastAddressSuggestions[0];
+                        location = {
+                            latitude: top.latitude,
+                            longitude: top.longitude
+                        };
+
+                        // Reflect the actually used address in the input field
+                        if (addressInput) {
+                            addressInput.value = top.address;
+                        }
+                    }
+                }
+
+                // If we have no suggestions available (e.g. API issue), fall back to direct geocoding
+                if (!location) {
+                    location = await geocodeAddress(address);
+                }
+
                 if (!location) {
                     throw new Error(`Address not found: '${address}'. Please try a more specific address.`);
                 }
@@ -620,6 +656,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function displaySuggestions(suggestions) {
+        // Store suggestions for potential fallback during form submission
+        lastAddressSuggestions = suggestions || [];
+
         suggestionsContainer.innerHTML = '';
         selectedSuggestionIndex = -1;
         
